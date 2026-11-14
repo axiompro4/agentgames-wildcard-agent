@@ -1,0 +1,11 @@
+PASS  server starts and /health responds
+PASS  GET /health -> { ok: true } — {"ok":true}
+PASS  preflight HTTP 200 — got 200
+PASS  preflight body is { ok: true, protocolVersion: "v1" } — {"ok":true,"protocolVersion":"v1"}
+PASS  preflight response signature valid
+PASS  task HTTP 200 — got 200
+PASS  task response well-formed (ok, type=forecast, result.answer) — {"ok":true,"protocolVersion":"v1","type":"forecast","taskId":"selftest-task-1","result":{"answer":"no","confidence":0.5,"rationale":"placeholder-strategy: deterministic seed; no market model attached yet"}}
+PASS  task response signature valid
+PASS  bad signature -> HTTP 401 — got 401
+
+SELFTEST: ALL CHECKS PASSED
