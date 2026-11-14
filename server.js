@@ -284,22 +284,25 @@ function parseGatekeeperInput(task) {
 
 /**
  * Gatekeeper decision. First failure wins, in this order:
- *   VK_MISMATCH -> RECIPIENT_MISMATCH -> PROOF_EXPIRED ->
- *   EXCEEDS_MAX_TRANSFER -> THRESHOLD_NOT_MET -> PROOF_REUSED
- * All checks passed -> APPROVE / ALL_CHECKS_PASSED.
+ *   VK_SUBSTITUTION -> RECIPIENT_MISMATCH -> EXPIRED_CONDITION ->
+ *   EXCEEDS_MAX_TRANSFER -> THRESHOLD_MISMATCH -> PROOF_REUSED
+ * All checks passed -> APPROVE / VALID_CONDITION.
  * Missing/malformed fields -> REJECT / MALFORMED_INPUT (checked first).
+ * Note: EXCEEDS_MAX_TRANSFER and PROOF_REUSED are unconfirmed guesses —
+ * those trap types have not been sampled in live practice yet; the other
+ * codes match the platform's observed trap-type vocabulary exactly.
  */
 function gatekeeperDecision(task) {
   const input = parseGatekeeperInput(task);
   if (!input) return { decision: 'REJECT', reason_code: 'MALFORMED_INPUT' };
-  if (input.proof_vk !== input.registered_vk) return { decision: 'REJECT', reason_code: 'VK_MISMATCH' };
+  if (input.proof_vk !== input.registered_vk) return { decision: 'REJECT', reason_code: 'VK_SUBSTITUTION' };
   if (input.recipient !== input.condition_recipient) return { decision: 'REJECT', reason_code: 'RECIPIENT_MISMATCH' };
-  if (input.current_block > input.expiry_block) return { decision: 'REJECT', reason_code: 'PROOF_EXPIRED' };
+  if (input.current_block > input.expiry_block) return { decision: 'REJECT', reason_code: 'EXPIRED_CONDITION' };
   if (input.amount > input.max_transfer) return { decision: 'REJECT', reason_code: 'EXCEEDS_MAX_TRANSFER' };
-  if (input.public_balance < input.minimum) return { decision: 'REJECT', reason_code: 'THRESHOLD_NOT_MET' };
+  if (input.public_balance < input.minimum) return { decision: 'REJECT', reason_code: 'THRESHOLD_MISMATCH' };
   if (seenProofTx.has(input.proof_tx)) return { decision: 'REJECT', reason_code: 'PROOF_REUSED' };
   rememberProofTx(input.proof_tx);
-  return { decision: 'APPROVE', reason_code: 'ALL_CHECKS_PASSED' };
+  return { decision: 'APPROVE', reason_code: 'VALID_CONDITION' };
 }
 
 /** Preflight detection: explicit markers the platform's connectivity check may use. */

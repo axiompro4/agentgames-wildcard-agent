@@ -7,13 +7,13 @@ PASS  task HTTP 200 — got 200
 PASS  task response well-formed (ok, type=forecast, result.answer) — {"ok":true,"protocolVersion":"v1","type":"forecast","taskId":"selftest-task-1","result":{"answer":"no","confidence":0.5,"rationale":"placeholder-strategy: deterministic seed; no market model attached yet"}}
 PASS  task response signature valid
 PASS  gatekeeper real practice payload -> REJECT/RECIPIENT_MISMATCH — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"RECIPIENT_MISMATCH","taskId":"practice_b7287d16-33ee-47d6-896c-6030a3acf422"}
-PASS  gatekeeper clean payload -> APPROVE/ALL_CHECKS_PASSED — {"ok":true,"protocolVersion":"v1","decision":"APPROVE","reason_code":"ALL_CHECKS_PASSED","taskId":"practice_clean"}
+PASS  gatekeeper clean payload -> APPROVE/VALID_CONDITION — {"ok":true,"protocolVersion":"v1","decision":"APPROVE","reason_code":"VALID_CONDITION","taskId":"practice_clean"}
 PASS  gatekeeper clean response signature valid
-PASS  gatekeeper vk mismatch -> REJECT/VK_MISMATCH — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"VK_MISMATCH","taskId":"practice_vk"}
-PASS  gatekeeper expired -> REJECT/PROOF_EXPIRED — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"PROOF_EXPIRED","taskId":"practice_expired"}
+PASS  gatekeeper vk mismatch -> REJECT/VK_SUBSTITUTION — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"VK_SUBSTITUTION","taskId":"practice_vk"}
+PASS  gatekeeper expired -> REJECT/EXPIRED_CONDITION — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"EXPIRED_CONDITION","taskId":"practice_expired"}
 PASS  gatekeeper amount above max -> REJECT/EXCEEDS_MAX_TRANSFER — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"EXCEEDS_MAX_TRANSFER","taskId":"practice_amount"}
-PASS  gatekeeper balance below minimum -> REJECT/THRESHOLD_NOT_MET — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"THRESHOLD_NOT_MET","taskId":"practice_balance"}
-PASS  gatekeeper reuse first submission -> APPROVE/ALL_CHECKS_PASSED — {"ok":true,"protocolVersion":"v1","decision":"APPROVE","reason_code":"ALL_CHECKS_PASSED","taskId":"practice_reuse"}
+PASS  gatekeeper balance below minimum -> REJECT/THRESHOLD_MISMATCH — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"THRESHOLD_MISMATCH","taskId":"practice_balance"}
+PASS  gatekeeper reuse first submission -> APPROVE/VALID_CONDITION — {"ok":true,"protocolVersion":"v1","decision":"APPROVE","reason_code":"VALID_CONDITION","taskId":"practice_reuse"}
 PASS  gatekeeper reuse second submission -> REJECT/PROOF_REUSED — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"PROOF_REUSED","taskId":"practice_reuse"}
 PASS  bad signature -> HTTP 401 — got 401
 

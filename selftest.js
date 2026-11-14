@@ -174,7 +174,7 @@ async function main() {
       'clean payload',
       gkPayload({ ...GK_INPUT, proof_tx: gkTx(2) }, 'practice_clean'),
       'APPROVE',
-      'ALL_CHECKS_PASSED'
+      'VALID_CONDITION'
     );
     check(
       'gatekeeper clean response signature valid',
@@ -186,7 +186,7 @@ async function main() {
       'vk mismatch',
       gkPayload({ ...GK_INPUT, proof_tx: gkTx(3), proof_vk: `0x${'f'.repeat(64)}` }, 'practice_vk'),
       'REJECT',
-      'VK_MISMATCH'
+      'VK_SUBSTITUTION'
     );
 
     // (d) proof expired (current block past expiry)
@@ -194,7 +194,7 @@ async function main() {
       'expired',
       gkPayload({ ...GK_INPUT, proof_tx: gkTx(4), current_block: 8430001 }, 'practice_expired'),
       'REJECT',
-      'PROOF_EXPIRED'
+      'EXPIRED_CONDITION'
     );
 
     // (e) amount above the transfer cap
@@ -210,12 +210,12 @@ async function main() {
       'balance below minimum',
       gkPayload({ ...GK_INPUT, proof_tx: gkTx(6), public_balance: '999' }, 'practice_balance'),
       'REJECT',
-      'THRESHOLD_NOT_MET'
+      'THRESHOLD_MISMATCH'
     );
 
     // (g) same proof_tx submitted twice: first APPROVE, then PROOF_REUSED
     const reusePayload = gkPayload({ ...GK_INPUT, proof_tx: gkTx(7) }, 'practice_reuse');
-    await gkCase('reuse first submission', reusePayload, 'APPROVE', 'ALL_CHECKS_PASSED');
+    await gkCase('reuse first submission', reusePayload, 'APPROVE', 'VALID_CONDITION');
     await gkCase('reuse second submission', reusePayload, 'REJECT', 'PROOF_REUSED');
 
     // 5. bad signature rejected
