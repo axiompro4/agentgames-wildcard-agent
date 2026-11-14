@@ -118,7 +118,98 @@ const taskHandlers = {
       },
     };
   },
+
+  /**
+   * Proof Gatekeeper tasks (protocol-v1).
+   *
+   * The platform's schema requires top-level `decision` ("APPROVE"|"REJECT")
+   * and `reason_code` (string) — a generic acknowledgement fails validation.
+   *
+   * INSTRUMENTATION BUILD: the exact task-payload field names are not yet
+   * published anywhere we can read, so for now the decision is the safe
+   * gatekeeper default "REJECT" and `reason_code` carries a bounded
+   * structural descriptor of the received payload (see describePayload), so
+   * the payload shape surfaces in the platform's practice diagnostics. Real
+   * verification (Groth16 validity, vk/condition match, threshold, proof
+   * reuse) replaces this once the payload shape is known.
+   */
+  gatekeeper(task) {
+    return {
+      ok: true,
+      protocolVersion: PROTOCOL_VERSION,
+      decision: 'REJECT',
+      reason_code: describePayload(task),
+      taskId: task.id ?? task.taskId ?? task.task_id ?? null,
+    };
+  },
 };
+
+/* ------------------------------------------------------------------ */
+/* Proof Gatekeeper detection + payload descriptor                     */
+/* ------------------------------------------------------------------ */
+
+const GATEKEEPER_TYPE_WORDS = ['gatekeeper', 'gate_keeper', 'gate-keeper', 'proof'];
+const PROOF_FIELD_NAMES = [
+  'proof', 'proofdata', 'proof_data',
+  'verificationkey', 'verification_key', 'vk', 'vkhash', 'vk_hash',
+  'publicsignals', 'publicinputs', 'public_signals', 'public_inputs',
+  'threshold', 'minthreshold', 'min_threshold',
+  'reference', 'ref', 'proofreference', 'proof_reference',
+  'condition', 'conditionid', 'condition_id',
+];
+
+/**
+ * Liberal Gatekeeper detection: a type/kind/event/category/game/track/action
+ * field mentioning gatekeeper/proof, or any proof-ish field on the task (or a
+ * nested task/payload/data object).
+ */
+function isGatekeeperTask(task) {
+  if (!task || typeof task !== 'object') return false;
+  const hints = [task.type, task.kind, task.event, task.category, task.game, task.track, task.action]
+    .filter((v) => typeof v === 'string')
+    .join(' ')
+    .toLowerCase();
+  if (GATEKEEPER_TYPE_WORDS.some((w) => hints.includes(w))) return true;
+  const containers = [task, task.task, task.payload, task.data].filter(
+    (o) => o && typeof o === 'object' && !Array.isArray(o)
+  );
+  for (const c of containers) {
+    if (c !== task) {
+      const inner = String(c.type ?? c.kind ?? '').toLowerCase();
+      if (GATEKEEPER_TYPE_WORDS.some((w) => inner.includes(w))) return true;
+    }
+    const keys = new Set(Object.keys(c).map((k) => k.toLowerCase()));
+    if (PROOF_FIELD_NAMES.some((f) => keys.has(f))) return true;
+  }
+  return false;
+}
+
+function valueType(v) {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'array';
+  return typeof v; // string | number | boolean | object | undefined
+}
+
+/**
+ * Bounded structural descriptor of a payload, e.g.
+ * "dbg:id:string,proof:object(pi_a,pi_b,pi_c),threshold:number".
+ * Lists `key:type` for every top-level key; object values also list their
+ * immediate subkeys. Whole string capped at 300 chars (incl. "dbg:" prefix).
+ */
+function describePayload(task) {
+  const parts = [];
+  for (const [key, val] of Object.entries(task)) {
+    const t = valueType(val);
+    if (t === 'object') {
+      const subs = Object.keys(val).slice(0, 12);
+      parts.push(subs.length ? `${key}:object(${subs.join(',')})` : `${key}:object`);
+    } else {
+      parts.push(`${key}:${t}`);
+    }
+  }
+  const out = 'dbg:' + parts.join(',');
+  return out.length > 300 ? out.slice(0, 297) + '...' : out;
+}
 
 /** Preflight detection: explicit markers the platform's connectivity check may use. */
 function isPreflight(task) {
@@ -132,6 +223,12 @@ function isPreflight(task) {
 function handleTask(task) {
   if (isPreflight(task) || Object.keys(task).length === 0) {
     return { status: 200, body: { ok: true, protocolVersion: PROTOCOL_VERSION } };
+  }
+  // Proof Gatekeeper tasks have their own protocol-v1 response schema
+  // (decision + reason_code) and are detected liberally — before the generic
+  // type registry, since their `type` string is not yet confirmed.
+  if (isGatekeeperTask(task)) {
+    return { status: 200, body: taskHandlers.gatekeeper(task) };
   }
   const type = String(task.type ?? task.taskType ?? task.task?.type ?? '').toLowerCase();
   const handler = taskHandlers[type];

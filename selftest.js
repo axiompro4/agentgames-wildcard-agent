@@ -7,7 +7,8 @@
  *   2. POST /agent  signed preflight    -> expects { ok: true, protocolVersion: "v1" }
  *                                          and a VALID response signature
  *   3. POST /agent  signed forecast task-> expects a signed, well-formed result
- *   4. POST /agent  bad signature       -> expects HTTP 401
+ *   4. POST /agent  signed Gatekeeper   -> expects decision + reason_code (dbg:)
+ *   5. POST /agent  bad signature       -> expects HTTP 401
  *
  * Run:  node selftest.js
  */
@@ -105,7 +106,55 @@ async function main() {
       verifyResponseSignature(SECRET, task.rawRes, task.sigHeader)
     );
 
-    // 4. bad signature rejected
+    // 4. signed Gatekeeper task (mock payload with proof-ish fields)
+    const gk = await postSigned(
+      {
+        type: 'proof_gatekeeper',
+        id: 'practice_mock_1',
+        proof: {
+          pi_a: ['1', '2'],
+          pi_b: [['1', '2'], ['3', '4']],
+          pi_c: ['1', '2'],
+          protocol: 'groth16',
+          curve: 'bn128',
+        },
+        verificationKey: { protocol: 'groth16', curve: 'bn128' },
+        publicSignals: ['12345'],
+        threshold: 100,
+        reference: 'ref-abc',
+        condition: 'payment-release',
+      },
+      SECRET
+    );
+    check('gatekeeper HTTP 200', gk.status === 200, `got ${gk.status}`);
+    check(
+      'gatekeeper response has decision=REJECT and string reason_code',
+      gk.json?.decision === 'REJECT' && typeof gk.json?.reason_code === 'string',
+      JSON.stringify(gk.json)
+    );
+    check(
+      'gatekeeper reason_code dbg lists mock keys',
+      typeof gk.json?.reason_code === 'string' &&
+        gk.json.reason_code.startsWith('dbg:') &&
+        gk.json.reason_code.includes('proof:object(pi_a,pi_b,pi_c,protocol,curve)') &&
+        gk.json.reason_code.includes('verificationKey:object') &&
+        gk.json.reason_code.includes('publicSignals:array') &&
+        gk.json.reason_code.includes('threshold:number') &&
+        gk.json.reason_code.includes('reference:string') &&
+        gk.json.reason_code.includes('condition:string'),
+      gk.json?.reason_code || ''
+    );
+    check(
+      'gatekeeper reason_code within 300 chars',
+      typeof gk.json?.reason_code === 'string' && gk.json.reason_code.length <= 300,
+      `len=${gk.json?.reason_code?.length}`
+    );
+    check(
+      'gatekeeper response signature valid',
+      verifyResponseSignature(SECRET, gk.rawRes, gk.sigHeader)
+    );
+
+    // 5. bad signature rejected
     const raw = Buffer.from(JSON.stringify({ type: 'preflight' }), 'utf8');
     const bad = await fetch(`${BASE}/agent`, {
       method: 'POST',

@@ -5,4 +5,9 @@ PASS  preflight: response signature verifies over raw body
 PASS  preflight: content-type is application/json
 PASS  forged signature: status 401
 PASS  forged signature: error body
-VERCEL TEST: ALL 7 CHECKS PASSED
+PASS  gatekeeper: status 200
+PASS  gatekeeper: decision=REJECT and string reason_code
+PASS  gatekeeper: reason_code dbg lists mock keys
+PASS  gatekeeper: reason_code within 300 chars
+PASS  gatekeeper: response signature verifies over raw body
+VERCEL TEST: ALL 12 CHECKS PASSED
