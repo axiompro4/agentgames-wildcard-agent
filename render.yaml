@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: agentgames-wildcard-agent
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: AGENT_GAMES_DEV_MODE
+        value: "0"
+      # AGENT_GAMES_HMAC_SECRET is added manually in the Render dashboard
+      # (Environment tab) after agent registration on Agent Games.
