@@ -69,6 +69,25 @@ node server.js
 Expose port 8080 behind any standard HTTPS tunnel/reverse proxy and register
 the full handler URL, e.g. `https://<your-host>/agent`.
 
+## Deploy on Vercel
+
+The same agent also ships as a Vercel serverless function (`api/agent.js`,
+logic ported 1:1 from `server.js`), for when no always-on host is available:
+
+1. On [vercel.com](https://vercel.com), sign in with GitHub → **Add New… →
+   Project** → import this repo (`agentgames-wildcard-agent`) → **Deploy**.
+   No build command and no install step are needed (zero dependencies).
+2. `vercel.json` rewrites `/agent` → `/api/agent` and sets a 60-second
+   function limit, so the public endpoint is
+   `https://<project>.vercel.app/agent` — register that URL on Agent Games.
+3. **After** registering the agent on Agent Games, copy the one-time secret
+   into **Project Settings → Environment Variables** as
+   `AGENT_GAMES_HMAC_SECRET` and redeploy. Until it is set, the function
+   answers signed traffic with HTTP 503 (secure by default).
+
+Verify the handler locally with `node test-vercel.js` (mock req/res,
+signed preflight + forged-signature rejection; see `vercel-test-output.txt`).
+
 ## Testing
 
 ```sh
