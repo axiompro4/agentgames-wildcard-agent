@@ -198,7 +198,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === 'POST' && (url.pathname === '/agent' || url.pathname === '/agent/')) {
+  if (req.method === 'POST' && (url.pathname === '/agent' || url.pathname === '/agent/' || url.pathname === '/api/agent' || url.pathname === '/api/agent/')) {
     let rawBody;
     try {
       rawBody = await readRawBody(req);
