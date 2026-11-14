@@ -7,7 +7,7 @@
  *  1. Signed preflight -> 200, exact {ok:true, protocolVersion:"v1"} body,
  *     and an `x-agent-games-signature` response header that verifies.
  *  2. Forged signature -> 401.
- *  3. Signed Gatekeeper task -> decision + pattern-safe reason_code per protocol-v1.
+ *  3. Signed Gatekeeper tasks -> real decision rules (7 cases a-g).
  *
  * Run: node test-vercel.js
  */
@@ -90,52 +90,123 @@ function check(name, cond) {
     res2.body && JSON.parse(res2.body.toString('utf8')).error === 'invalid_signature'
   );
 
-  // --- 3. Signed Gatekeeper task ---------------------------------------------
-  const gkRaw = JSON.stringify({
-    type: 'proof_gatekeeper',
-    id: 'practice_mock_1',
-    proof: {
-      pi_a: ['1', '2'],
-      pi_b: [['1', '2'], ['3', '4']],
-      pi_c: ['1', '2'],
-      protocol: 'groth16',
-      curve: 'bn128',
-    },
-    verificationKey: { protocol: 'groth16', curve: 'bn128' },
-    publicSignals: ['12345'],
-    threshold: 100,
-    reference: 'ref-abc',
-    condition: 'payment-release',
+  // --- 3. Signed Gatekeeper tasks — real decision rules ----------------------
+  async function callTask(obj) {
+    const raw = JSON.stringify(obj);
+    const res = mockRes();
+    await handler(mockReq(raw, { [SIG]: sign(raw), 'content-type': 'application/json' }), res);
+    return {
+      status: res.statusCode,
+      json: res.body ? JSON.parse(res.body.toString('utf8')) : null,
+      sigOk: res.getHeader(SIG) === sign(res.body),
+    };
+  }
+  // GK_INPUT mirrors the platform's real practice payload with the
+  // recipient fixed (clean); each case varies one field. proof_tx values
+  // are unique per case (except the deliberate reuse case) so the seen-set
+  // only fires where intended.
+  const GK_INPUT = {
+    registered_vk: '0x6b79c6012a6d8651f3e13bc4d2a20370280ab49700c90c5316d4168bfbad77b0',
+    minimum: '1000',
+    public_balance: '1460',
+    expiry_block: 8430000,
+    current_block: 8420000,
+    recipient: '0xabcdef1234567890abcdef1234567890abcdef12',
+    condition_recipient: '0xabcdef1234567890abcdef1234567890abcdef12',
+    amount: '500',
+    max_transfer: '1000',
+    proof_tx: '0x00000000000000000000000000000000',
+    proof_vk: '0x6b79c6012a6d8651f3e13bc4d2a20370280ab49700c90c5316d4168bfbad77b0',
+  };
+  const gkTx = (n) => `0x${String(n).padStart(32, '0')}`;
+  const gkPayload = (input, taskId) => ({
+    type: 'agent-games.proof-gatekeeper.v1',
+    task_id: taskId,
+    mode: 'practice',
+    issued_at: '2026-11-14T20:44:01.961Z',
+    deadline_at: '2026-11-14T20:44:16.961Z',
+    input,
   });
-  const res3 = mockRes();
-  await handler(mockReq(gkRaw, { [SIG]: sign(gkRaw), 'content-type': 'application/json' }), res3);
-  const gk = res3.body ? JSON.parse(res3.body.toString('utf8')) : null;
+  async function gkCase(name, payload, decision, reason) {
+    const r = await callTask(payload);
+    check(
+      `gatekeeper ${name} -> ${decision}/${reason}`,
+      r.status === 200 &&
+        r.json?.decision === decision &&
+        r.json?.reason_code === reason &&
+        /^[A-Z0-9_-]{2,80}$/.test(r.json?.reason_code ?? '')
+    );
+    return r;
+  }
 
-  check('gatekeeper: status 200', res3.statusCode === 200);
-  check(
-    'gatekeeper: decision=REJECT and string reason_code',
-    gk && gk.decision === 'REJECT' && typeof gk.reason_code === 'string'
+  // (a) the real practice payload, verbatim -> RECIPIENT_MISMATCH
+  await gkCase(
+    'real practice payload',
+    gkPayload(
+      {
+        registered_vk: '0x6b79c6012a6d8651f3e13bc4d2a20370280ab49700c90c5316d4168bfbad77b0',
+        minimum: '1000',
+        public_balance: '1460',
+        expiry_block: 8430000,
+        current_block: 8420000,
+        recipient: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        condition_recipient: '0xabcdef1234567890abcdef1234567890abcdef12',
+        amount: '500',
+        max_transfer: '1000',
+        proof_tx: '0xb7287d1633ee47d6896c6030a3acf422',
+        proof_vk: '0x6b79c6012a6d8651f3e13bc4d2a20370280ab49700c90c5316d4168bfbad77b0',
+      },
+      'practice_b7287d16-33ee-47d6-896c-6030a3acf422'
+    ),
+    'REJECT',
+    'RECIPIENT_MISMATCH'
   );
-  check(
-    'gatekeeper: reason_code matches protocol pattern /^[A-Z0-9_-]{2,80}$/',
-    !!gk && /^[A-Z0-9_-]{2,80}$/.test(gk.reason_code)
+
+  // (b) clean payload -> APPROVE (response signature also verified)
+  const clean = await gkCase(
+    'clean payload',
+    gkPayload({ ...GK_INPUT, proof_tx: gkTx(2) }, 'practice_clean'),
+    'APPROVE',
+    'ALL_CHECKS_PASSED'
   );
-  check(
-    'gatekeeper: reason_code decodes to mock key names',
-    !!gk &&
-      gk.reason_code ===
-        'K_TYPE-ID-PROOF-VERIFICATIONKEY-PUBLICSIGNALS-THRESHOLD-REFERENCE-CONDITION' &&
-      gk.reason_code.slice(2).split('-').join(',') ===
-        'TYPE,ID,PROOF,VERIFICATIONKEY,PUBLICSIGNALS,THRESHOLD,REFERENCE,CONDITION'
+  check('gatekeeper: clean response signature verifies over raw body', clean.sigOk);
+
+  // (c) verification key mismatch
+  await gkCase(
+    'vk mismatch',
+    gkPayload({ ...GK_INPUT, proof_tx: gkTx(3), proof_vk: `0x${'f'.repeat(64)}` }, 'practice_vk'),
+    'REJECT',
+    'VK_MISMATCH'
   );
-  check(
-    'gatekeeper: reason_code within 80 chars',
-    !!gk && gk.reason_code.length <= 80
+
+  // (d) proof expired (current block past expiry)
+  await gkCase(
+    'expired',
+    gkPayload({ ...GK_INPUT, proof_tx: gkTx(4), current_block: 8430001 }, 'practice_expired'),
+    'REJECT',
+    'PROOF_EXPIRED'
   );
-  check(
-    'gatekeeper: response signature verifies over raw body',
-    res3.getHeader(SIG) === sign(res3.body)
+
+  // (e) amount above the transfer cap
+  await gkCase(
+    'amount above max',
+    gkPayload({ ...GK_INPUT, proof_tx: gkTx(5), amount: '1500' }, 'practice_amount'),
+    'REJECT',
+    'EXCEEDS_MAX_TRANSFER'
   );
+
+  // (f) public balance below the minimum
+  await gkCase(
+    'balance below minimum',
+    gkPayload({ ...GK_INPUT, proof_tx: gkTx(6), public_balance: '999' }, 'practice_balance'),
+    'REJECT',
+    'THRESHOLD_NOT_MET'
+  );
+
+  // (g) same proof_tx submitted twice: first APPROVE, then PROOF_REUSED
+  const reusePayload = gkPayload({ ...GK_INPUT, proof_tx: gkTx(7) }, 'practice_reuse');
+  await gkCase('reuse first submission', reusePayload, 'APPROVE', 'ALL_CHECKS_PASSED');
+  await gkCase('reuse second submission', reusePayload, 'REJECT', 'PROOF_REUSED');
 
   const failed = results.filter(([, ok]) => !ok);
   console.log(

@@ -7,7 +7,7 @@
  *   2. POST /agent  signed preflight    -> expects { ok: true, protocolVersion: "v1" }
  *                                          and a VALID response signature
  *   3. POST /agent  signed forecast task-> expects a signed, well-formed result
- *   4. POST /agent  signed Gatekeeper   -> expects decision + pattern-safe reason_code
+ *   4. POST /agent  signed Gatekeeper   -> real decision rules (7 cases a-g)
  *   5. POST /agent  bad signature       -> expects HTTP 401
  *
  * Run:  node selftest.js
@@ -106,55 +106,117 @@ async function main() {
       verifyResponseSignature(SECRET, task.rawRes, task.sigHeader)
     );
 
-    // 4. signed Gatekeeper task (mock payload with proof-ish fields)
-    const gk = await postSigned(
-      {
-        type: 'proof_gatekeeper',
-        id: 'practice_mock_1',
-        proof: {
-          pi_a: ['1', '2'],
-          pi_b: [['1', '2'], ['3', '4']],
-          pi_c: ['1', '2'],
-          protocol: 'groth16',
-          curve: 'bn128',
+    // 4. signed Gatekeeper tasks — real decision rules.
+    // GK_INPUT mirrors the platform's real practice payload with the
+    // recipient fixed (clean); each case varies one field. proof_tx values
+    // are unique per case (except the deliberate reuse case) so the
+    // seen-set only fires where intended.
+    const GK_INPUT = {
+      registered_vk: '0x6b79c6012a6d8651f3e13bc4d2a20370280ab49700c90c5316d4168bfbad77b0',
+      minimum: '1000',
+      public_balance: '1460',
+      expiry_block: 8430000,
+      current_block: 8420000,
+      recipient: '0xabcdef1234567890abcdef1234567890abcdef12',
+      condition_recipient: '0xabcdef1234567890abcdef1234567890abcdef12',
+      amount: '500',
+      max_transfer: '1000',
+      proof_tx: '0x00000000000000000000000000000000',
+      proof_vk: '0x6b79c6012a6d8651f3e13bc4d2a20370280ab49700c90c5316d4168bfbad77b0',
+    };
+    const gkTx = (n) => `0x${String(n).padStart(32, '0')}`;
+    const gkPayload = (input, taskId) => ({
+      type: 'agent-games.proof-gatekeeper.v1',
+      task_id: taskId,
+      mode: 'practice',
+      issued_at: '2026-11-14T20:44:01.961Z',
+      deadline_at: '2026-11-14T20:44:16.961Z',
+      input,
+    });
+    const gkCase = async (name, payload, decision, reason) => {
+      const r = await postSigned(payload, SECRET);
+      check(
+        `gatekeeper ${name} -> ${decision}/${reason}`,
+        r.status === 200 &&
+          r.json?.decision === decision &&
+          r.json?.reason_code === reason &&
+          /^[A-Z0-9_-]{2,80}$/.test(r.json?.reason_code ?? ''),
+        JSON.stringify(r.json)
+      );
+      return r;
+    };
+
+    // (a) the real practice payload, verbatim -> RECIPIENT_MISMATCH
+    await gkCase(
+      'real practice payload',
+      gkPayload(
+        {
+          registered_vk: '0x6b79c6012a6d8651f3e13bc4d2a20370280ab49700c90c5316d4168bfbad77b0',
+          minimum: '1000',
+          public_balance: '1460',
+          expiry_block: 8430000,
+          current_block: 8420000,
+          recipient: '0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+          condition_recipient: '0xabcdef1234567890abcdef1234567890abcdef12',
+          amount: '500',
+          max_transfer: '1000',
+          proof_tx: '0xb7287d1633ee47d6896c6030a3acf422',
+          proof_vk: '0x6b79c6012a6d8651f3e13bc4d2a20370280ab49700c90c5316d4168bfbad77b0',
         },
-        verificationKey: { protocol: 'groth16', curve: 'bn128' },
-        publicSignals: ['12345'],
-        threshold: 100,
-        reference: 'ref-abc',
-        condition: 'payment-release',
-      },
-      SECRET
+        'practice_b7287d16-33ee-47d6-896c-6030a3acf422'
+      ),
+      'REJECT',
+      'RECIPIENT_MISMATCH'
     );
-    check('gatekeeper HTTP 200', gk.status === 200, `got ${gk.status}`);
-    check(
-      'gatekeeper response has decision=REJECT and string reason_code',
-      gk.json?.decision === 'REJECT' && typeof gk.json?.reason_code === 'string',
-      JSON.stringify(gk.json)
-    );
-    check(
-      'gatekeeper reason_code matches protocol pattern /^[A-Z0-9_-]{2,80}$/',
-      typeof gk.json?.reason_code === 'string' && /^[A-Z0-9_-]{2,80}$/.test(gk.json.reason_code),
-      gk.json?.reason_code || ''
+
+    // (b) clean payload -> APPROVE (response signature also verified)
+    const clean = await gkCase(
+      'clean payload',
+      gkPayload({ ...GK_INPUT, proof_tx: gkTx(2) }, 'practice_clean'),
+      'APPROVE',
+      'ALL_CHECKS_PASSED'
     );
     check(
-      'gatekeeper reason_code decodes to mock key names',
-      typeof gk.json?.reason_code === 'string' &&
-        gk.json.reason_code ===
-          'K_TYPE-ID-PROOF-VERIFICATIONKEY-PUBLICSIGNALS-THRESHOLD-REFERENCE-CONDITION' &&
-        gk.json.reason_code.slice(2).split('-').join(',') ===
-          'TYPE,ID,PROOF,VERIFICATIONKEY,PUBLICSIGNALS,THRESHOLD,REFERENCE,CONDITION',
-      gk.json?.reason_code || ''
+      'gatekeeper clean response signature valid',
+      verifyResponseSignature(SECRET, clean.rawRes, clean.sigHeader)
     );
-    check(
-      'gatekeeper reason_code within 80 chars',
-      typeof gk.json?.reason_code === 'string' && gk.json.reason_code.length <= 80,
-      `len=${gk.json?.reason_code?.length}`
+
+    // (c) verification key mismatch
+    await gkCase(
+      'vk mismatch',
+      gkPayload({ ...GK_INPUT, proof_tx: gkTx(3), proof_vk: `0x${'f'.repeat(64)}` }, 'practice_vk'),
+      'REJECT',
+      'VK_MISMATCH'
     );
-    check(
-      'gatekeeper response signature valid',
-      verifyResponseSignature(SECRET, gk.rawRes, gk.sigHeader)
+
+    // (d) proof expired (current block past expiry)
+    await gkCase(
+      'expired',
+      gkPayload({ ...GK_INPUT, proof_tx: gkTx(4), current_block: 8430001 }, 'practice_expired'),
+      'REJECT',
+      'PROOF_EXPIRED'
     );
+
+    // (e) amount above the transfer cap
+    await gkCase(
+      'amount above max',
+      gkPayload({ ...GK_INPUT, proof_tx: gkTx(5), amount: '1500' }, 'practice_amount'),
+      'REJECT',
+      'EXCEEDS_MAX_TRANSFER'
+    );
+
+    // (f) public balance below the minimum
+    await gkCase(
+      'balance below minimum',
+      gkPayload({ ...GK_INPUT, proof_tx: gkTx(6), public_balance: '999' }, 'practice_balance'),
+      'REJECT',
+      'THRESHOLD_NOT_MET'
+    );
+
+    // (g) same proof_tx submitted twice: first APPROVE, then PROOF_REUSED
+    const reusePayload = gkPayload({ ...GK_INPUT, proof_tx: gkTx(7) }, 'practice_reuse');
+    await gkCase('reuse first submission', reusePayload, 'APPROVE', 'ALL_CHECKS_PASSED');
+    await gkCase('reuse second submission', reusePayload, 'REJECT', 'PROOF_REUSED');
 
     // 5. bad signature rejected
     const raw = Buffer.from(JSON.stringify({ type: 'preflight' }), 'utf8');

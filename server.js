@@ -126,21 +126,20 @@ const taskHandlers = {
    * and `reason_code` matching /^[A-Z0-9_-]{2,80}$/ — a generic
    * acknowledgement fails validation.
    *
-   * INSTRUMENTATION BUILD: the exact task-payload field names are not yet
-   * published anywhere we can read, so for now the decision is the safe
-   * gatekeeper default "REJECT" and `reason_code` carries a pattern-safe
-   * encoding of the received payload's top-level key names (see
-   * gatekeeperReasonCode), so the payload shape surfaces in the platform's
-   * practice diagnostics; the full structure is also logged (GK_STRUCTURE).
-   * Real verification (Groth16 validity, vk/condition match, threshold,
-   * proof reuse) replaces this once the payload shape is known.
+   * REAL decision rules (see gatekeeperDecision): the task carries an
+   * `input` object describing a proof-backed transfer; the agent approves
+   * only if the proof's verification key matches the registered key, the
+   * recipient matches the condition, the proof is unexpired, the amount is
+   * within the transfer cap, the public balance meets the minimum, and the
+   * proof has not been seen before.
    */
   gatekeeper(task) {
+    const { decision, reason_code } = gatekeeperDecision(task);
     return {
       ok: true,
       protocolVersion: PROTOCOL_VERSION,
-      decision: 'REJECT',
-      reason_code: gatekeeperReasonCode(task),
+      decision,
+      reason_code,
       taskId: task.id ?? task.taskId ?? task.task_id ?? null,
     };
   },
@@ -158,6 +157,8 @@ const PROOF_FIELD_NAMES = [
   'threshold', 'minthreshold', 'min_threshold',
   'reference', 'ref', 'proofreference', 'proof_reference',
   'condition', 'conditionid', 'condition_id',
+  // Field names of the confirmed Gatekeeper `input` object.
+  'registered_vk', 'proof_vk', 'proof_tx', 'condition_recipient', 'public_balance',
 ];
 
 /**
@@ -172,7 +173,7 @@ function isGatekeeperTask(task) {
     .join(' ')
     .toLowerCase();
   if (GATEKEEPER_TYPE_WORDS.some((w) => hints.includes(w))) return true;
-  const containers = [task, task.task, task.payload, task.data].filter(
+  const containers = [task, task.task, task.payload, task.data, task.input].filter(
     (o) => o && typeof o === 'object' && !Array.isArray(o)
   );
   for (const c of containers) {
@@ -213,33 +214,92 @@ function describeStructure(task) {
   return parts.join(',');
 }
 
+/* ------------------------------------------------------------------ */
+/* Proof Gatekeeper decision rules                                     */
+/* ------------------------------------------------------------------ */
+
 /**
- * Pattern-safe instrumentation reason_code for Gatekeeper responses.
- * The platform requires /^[A-Z0-9_-]{2,80}$/. Encoding: "K_" followed by
- * the payload's top-level key names — each uppercased with any character
- * outside [A-Z0-9] mapped to "_" — joined with "-". Total length capped
- * at 80 chars: keys are appended whole and dropped once the next one
- * would overflow (a single oversized first key is hard-truncated as a
- * last resort). Empty payload -> "K_EMPTY".
+ * Seen proof_tx values, for the reuse rule. NOTE (serverless limitation):
+ * this set lives in process memory only — on Vercel it is best-effort
+ * across warm instances of api/agent.js; cold starts and parallel
+ * instances do not share it, so reuse detection there is advisory, not
+ * guaranteed. (server.js as a long-lived process keeps it reliably.)
  */
-function gatekeeperReasonCode(task) {
-  const keys = Object.keys(task ?? {});
-  if (keys.length === 0) return 'K_EMPTY';
-  const sanitize = (k) => String(k).toUpperCase().replace(/[^A-Z0-9]/g, '_') || '_';
-  let out = 'K_';
-  let first = true;
-  for (const key of keys) {
-    const name = sanitize(key);
-    const candidate = first ? out + name : `${out}-${name}`;
-    if (candidate.length > 80) {
-      // A single oversized first key is hard-truncated; otherwise this and
-      // all trailing keys are dropped cleanly (no partial key names).
-      return first ? candidate.slice(0, 80) : out;
-    }
-    out = candidate;
-    first = false;
+const SEEN_PROOF_TX_LIMIT = 1000;
+const seenProofTx = new Set();
+
+function rememberProofTx(tx) {
+  seenProofTx.add(tx);
+  // FIFO eviction: Sets iterate in insertion order, so the first value is
+  // the oldest.
+  while (seenProofTx.size > SEEN_PROOF_TX_LIMIT) {
+    seenProofTx.delete(seenProofTx.values().next().value);
   }
-  return out;
+}
+
+/** Hex string field (address / hash): returns the lowercased value or null. */
+function hexField(v) {
+  if (typeof v !== 'string') return null;
+  const s = v.trim();
+  return /^0x[0-9a-fA-F]+$/.test(s) ? s.toLowerCase() : null;
+}
+
+/** Integer field (string or number) -> BigInt, or null when malformed. */
+function intField(v) {
+  if (typeof v === 'bigint') return v;
+  if (typeof v === 'number') return Number.isInteger(v) ? BigInt(v) : null;
+  if (typeof v === 'string') {
+    const s = v.trim();
+    return /^-?\d+$/.test(s) ? BigInt(s) : null;
+  }
+  return null;
+}
+
+/**
+ * Extract and validate the Gatekeeper rule fields from a task. Fields live
+ * on `task.input`; when that is absent they are looked up on the task
+ * itself. Returns normalized values (lowercased hex strings, BigInt
+ * integers), or null when any required field is missing/malformed.
+ */
+function parseGatekeeperInput(task) {
+  const raw =
+    task && typeof task === 'object' && task.input && typeof task.input === 'object' && !Array.isArray(task.input)
+      ? task.input
+      : task ?? {};
+  const parsed = {
+    registered_vk: hexField(raw.registered_vk),
+    proof_vk: hexField(raw.proof_vk),
+    recipient: hexField(raw.recipient),
+    condition_recipient: hexField(raw.condition_recipient),
+    proof_tx: hexField(raw.proof_tx),
+    expiry_block: intField(raw.expiry_block),
+    current_block: intField(raw.current_block),
+    amount: intField(raw.amount),
+    max_transfer: intField(raw.max_transfer),
+    public_balance: intField(raw.public_balance),
+    minimum: intField(raw.minimum),
+  };
+  return Object.values(parsed).includes(null) ? null : parsed;
+}
+
+/**
+ * Gatekeeper decision. First failure wins, in this order:
+ *   VK_MISMATCH -> RECIPIENT_MISMATCH -> PROOF_EXPIRED ->
+ *   EXCEEDS_MAX_TRANSFER -> THRESHOLD_NOT_MET -> PROOF_REUSED
+ * All checks passed -> APPROVE / ALL_CHECKS_PASSED.
+ * Missing/malformed fields -> REJECT / MALFORMED_INPUT (checked first).
+ */
+function gatekeeperDecision(task) {
+  const input = parseGatekeeperInput(task);
+  if (!input) return { decision: 'REJECT', reason_code: 'MALFORMED_INPUT' };
+  if (input.proof_vk !== input.registered_vk) return { decision: 'REJECT', reason_code: 'VK_MISMATCH' };
+  if (input.recipient !== input.condition_recipient) return { decision: 'REJECT', reason_code: 'RECIPIENT_MISMATCH' };
+  if (input.current_block > input.expiry_block) return { decision: 'REJECT', reason_code: 'PROOF_EXPIRED' };
+  if (input.amount > input.max_transfer) return { decision: 'REJECT', reason_code: 'EXCEEDS_MAX_TRANSFER' };
+  if (input.public_balance < input.minimum) return { decision: 'REJECT', reason_code: 'THRESHOLD_NOT_MET' };
+  if (seenProofTx.has(input.proof_tx)) return { decision: 'REJECT', reason_code: 'PROOF_REUSED' };
+  rememberProofTx(input.proof_tx);
+  return { decision: 'APPROVE', reason_code: 'ALL_CHECKS_PASSED' };
 }
 
 /** Preflight detection: explicit markers the platform's connectivity check may use. */
@@ -257,10 +317,10 @@ function handleTask(task) {
   }
   // Proof Gatekeeper tasks have their own protocol-v1 response schema
   // (decision + reason_code) and are detected liberally — before the generic
-  // type registry, since their `type` string is not yet confirmed.
+  // type registry. Confirmed `type`: "agent-games.proof-gatekeeper.v1".
   if (isGatekeeperTask(task)) {
-    // Backup instrumentation channel: full payload structure (keys + types
-    // + immediate subkeys, never scalar values) lands in the server logs.
+    // Diagnostic channel: full payload structure (keys + types + immediate
+    // subkeys, never scalar values) lands in the server logs.
     console.log('GK_STRUCTURE ' + describeStructure(task));
     return { status: 200, body: taskHandlers.gatekeeper(task) };
   }

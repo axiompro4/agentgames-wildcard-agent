@@ -5,11 +5,21 @@ PASS  preflight: response signature verifies over raw body
 PASS  preflight: content-type is application/json
 PASS  forged signature: status 401
 PASS  forged signature: error body
-GK_STRUCTURE type:string,id:string,proof:object(pi_a,pi_b,pi_c,protocol,curve),verificationKey:object(protocol,curve),publicSignals:array,threshold:number,reference:string,condition:string
-PASS  gatekeeper: status 200
-PASS  gatekeeper: decision=REJECT and string reason_code
-PASS  gatekeeper: reason_code matches protocol pattern /^[A-Z0-9_-]{2,80}$/
-PASS  gatekeeper: reason_code decodes to mock key names
-PASS  gatekeeper: reason_code within 80 chars
-PASS  gatekeeper: response signature verifies over raw body
-VERCEL TEST: ALL 13 CHECKS PASSED
+GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
+PASS  gatekeeper real practice payload -> REJECT/RECIPIENT_MISMATCH
+GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
+PASS  gatekeeper clean payload -> APPROVE/ALL_CHECKS_PASSED
+PASS  gatekeeper: clean response signature verifies over raw body
+GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
+PASS  gatekeeper vk mismatch -> REJECT/VK_MISMATCH
+GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
+PASS  gatekeeper expired -> REJECT/PROOF_EXPIRED
+GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
+PASS  gatekeeper amount above max -> REJECT/EXCEEDS_MAX_TRANSFER
+GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
+PASS  gatekeeper balance below minimum -> REJECT/THRESHOLD_NOT_MET
+GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
+PASS  gatekeeper reuse first submission -> APPROVE/ALL_CHECKS_PASSED
+GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
+PASS  gatekeeper reuse second submission -> REJECT/PROOF_REUSED
+VERCEL TEST: ALL 16 CHECKS PASSED
