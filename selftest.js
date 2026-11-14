@@ -77,6 +77,17 @@ async function main() {
     const health = await (await fetch(`${BASE}/health`)).json();
     check('GET /health -> { ok: true }', health.ok === true, JSON.stringify(health));
 
+    // 1b. landing/demo page at the site root (Wildcard entry)
+    const landingRes = await fetch(`${BASE}/`);
+    const landingText = await landingRes.text();
+    check(
+      'GET / -> 200 HTML landing page mentioning Gatekeeper',
+      landingRes.status === 200 &&
+        (landingRes.headers.get('content-type') || '').includes('text/html') &&
+        landingText.includes('Gatekeeper'),
+      `got ${landingRes.status} ${(landingRes.headers.get('content-type') || '')}`
+    );
+
     // 2. signed preflight
     const pre = await postSigned({ type: 'preflight' }, SECRET);
     check('preflight HTTP 200', pre.status === 200, `got ${pre.status}`);

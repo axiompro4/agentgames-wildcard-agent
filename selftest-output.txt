@@ -1,5 +1,6 @@
 PASS  server starts and /health responds
 PASS  GET /health -> { ok: true } — {"ok":true}
+PASS  GET / -> 200 HTML landing page mentioning Gatekeeper — got 200 text/html; charset=utf-8
 PASS  preflight HTTP 200 — got 200
 PASS  preflight body is { ok: true, protocolVersion: "v1" } — {"ok":true,"protocolVersion":"v1"}
 PASS  preflight response signature valid

@@ -8,6 +8,7 @@
  *     and an `x-agent-games-signature` response header that verifies.
  *  2. Forged signature -> 401.
  *  3. Signed Gatekeeper tasks -> real decision rules (7 cases a-g).
+ *  4. GET / -> landing page HTML; GET /api/agent -> health JSON (unchanged).
  *
  * Run: node test-vercel.js
  */
@@ -207,6 +208,29 @@ function check(name, cond) {
   const reusePayload = gkPayload({ ...GK_INPUT, proof_tx: gkTx(7) }, 'practice_reuse');
   await gkCase('reuse first submission', reusePayload, 'APPROVE', 'VALID_CONDITION');
   await gkCase('reuse second submission', reusePayload, 'REJECT', 'PROOF_REUSED');
+
+  // --- 4. GET routes ---------------------------------------------------------
+  function mockGetReq(url) {
+    const req = Readable.from([]);
+    req.method = 'GET';
+    req.headers = {};
+    req.url = url;
+    return req;
+  }
+  const resRoot = mockRes();
+  await handler(mockGetReq('/'), resRoot);
+  check(
+    'GET /: landing page HTML mentioning Gatekeeper',
+    resRoot.statusCode === 200 &&
+      String(resRoot.getHeader('content-type')).includes('text/html') &&
+      resRoot.body.toString('utf8').includes('Gatekeeper')
+  );
+  const resAgentGet = mockRes();
+  await handler(mockGetReq('/api/agent'), resAgentGet);
+  check(
+    'GET /api/agent: health JSON unchanged',
+    resAgentGet.statusCode === 200 && resAgentGet.body.toString('utf8') === '{"ok":true}'
+  );
 
   const failed = results.filter(([, ok]) => !ok);
   console.log(

@@ -18,6 +18,7 @@
 
 const http = require('node:http');
 const crypto = require('node:crypto');
+const { LANDING_HTML } = require('./landing.js');
 
 const PROTOCOL_VERSION = 'v1';
 const AGENT_NAME = process.env.AGENT_GAMES_AGENT_NAME || 'villaintzy-agent';
@@ -384,8 +385,20 @@ function sendJson(res, status, obj, { sign }) {
   res.end(raw);
 }
 
+/** Send the public landing/demo page (Wildcard entry). Never signed. */
+function sendHtml(res, status, html) {
+  const raw = Buffer.from(html, 'utf8');
+  res.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'content-length': raw.length });
+  res.end(raw);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
+
+  if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    sendHtml(res, 200, LANDING_HTML);
+    return;
+  }
 
   if (req.method === 'GET' && url.pathname === '/health') {
     sendJson(res, 200, { ok: true }, { sign: false });

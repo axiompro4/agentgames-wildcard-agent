@@ -22,4 +22,6 @@ GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at
 PASS  gatekeeper reuse first submission -> APPROVE/VALID_CONDITION
 GK_STRUCTURE type:string,task_id:string,mode:string,issued_at:string,deadline_at:string,input:object(registered_vk,minimum,public_balance,expiry_block,current_block,recipient,condition_recipient,amount,max_transfer,proof_tx,proof_vk)
 PASS  gatekeeper reuse second submission -> REJECT/PROOF_REUSED
-VERCEL TEST: ALL 16 CHECKS PASSED
+PASS  GET /: landing page HTML mentioning Gatekeeper
+PASS  GET /api/agent: health JSON unchanged
+VERCEL TEST: ALL 18 CHECKS PASSED

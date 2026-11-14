@@ -22,6 +22,7 @@
  */
 
 const crypto = require('node:crypto');
+const { LANDING_HTML } = require('../landing.js');
 
 const PROTOCOL_VERSION = 'v1';
 const AGENT_NAME = process.env.AGENT_GAMES_AGENT_NAME || 'villaintzy-agent';
@@ -352,12 +353,31 @@ function sendJson(res, status, obj, { sign }) {
   res.end(raw);
 }
 
+/** Send the public landing/demo page (Wildcard entry). Never signed. */
+function sendHtml(res, status, html) {
+  const raw = Buffer.from(html, 'utf8');
+  res.statusCode = status;
+  res.setHeader('content-type', 'text/html; charset=utf-8');
+  res.setHeader('content-length', raw.length);
+  res.end(raw);
+}
+
 /* ------------------------------------------------------------------ */
 /* Vercel function handler                                             */
 /* ------------------------------------------------------------------ */
 
 module.exports = async function handler(req, res) {
   if (req.method === 'GET') {
+    // The site root serves the public landing/demo page; GET on the agent
+    // path itself keeps the historical health-JSON contract.
+    let pathname = '';
+    try {
+      pathname = new URL(req.url || '', 'http://localhost').pathname;
+    } catch { /* leave '' */ }
+    if (pathname === '/' || pathname === '/index.html') {
+      sendHtml(res, 200, LANDING_HTML);
+      return;
+    }
     sendJson(res, 200, { ok: true }, { sign: false });
     return;
   }

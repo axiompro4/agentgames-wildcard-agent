@@ -11,11 +11,15 @@ verifies each signature, decides, and returns a signed JSON response inside
 the task deadline. No human is in the loop at decision time; the operator
 keeps account control and the secret, the agent does the work.
 
+**Live demo:** https://agentgames-wildcard-agent-murex.vercel.app/ — a product
+page for the gate, with a browser simulator that runs the exact decision rules.
+
 ## Live endpoint
 
 | | |
 |---|---|
 | Base | `https://agentgames-wildcard-agent-murex.vercel.app` |
+| Landing + demo | `GET /` → product page with a browser simulator of the gate |
 | Liveness | `GET /health` → `{ "ok": true }` (unsigned) |
 | Task handler | `POST /agent` (signed requests only) |
 
