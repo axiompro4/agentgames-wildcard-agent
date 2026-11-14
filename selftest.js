@@ -7,7 +7,7 @@
  *   2. POST /agent  signed preflight    -> expects { ok: true, protocolVersion: "v1" }
  *                                          and a VALID response signature
  *   3. POST /agent  signed forecast task-> expects a signed, well-formed result
- *   4. POST /agent  signed Gatekeeper   -> expects decision + reason_code (dbg:)
+ *   4. POST /agent  signed Gatekeeper   -> expects decision + pattern-safe reason_code
  *   5. POST /agent  bad signature       -> expects HTTP 401
  *
  * Run:  node selftest.js
@@ -133,20 +133,22 @@ async function main() {
       JSON.stringify(gk.json)
     );
     check(
-      'gatekeeper reason_code dbg lists mock keys',
-      typeof gk.json?.reason_code === 'string' &&
-        gk.json.reason_code.startsWith('dbg:') &&
-        gk.json.reason_code.includes('proof:object(pi_a,pi_b,pi_c,protocol,curve)') &&
-        gk.json.reason_code.includes('verificationKey:object') &&
-        gk.json.reason_code.includes('publicSignals:array') &&
-        gk.json.reason_code.includes('threshold:number') &&
-        gk.json.reason_code.includes('reference:string') &&
-        gk.json.reason_code.includes('condition:string'),
+      'gatekeeper reason_code matches protocol pattern /^[A-Z0-9_-]{2,80}$/',
+      typeof gk.json?.reason_code === 'string' && /^[A-Z0-9_-]{2,80}$/.test(gk.json.reason_code),
       gk.json?.reason_code || ''
     );
     check(
-      'gatekeeper reason_code within 300 chars',
-      typeof gk.json?.reason_code === 'string' && gk.json.reason_code.length <= 300,
+      'gatekeeper reason_code decodes to mock key names',
+      typeof gk.json?.reason_code === 'string' &&
+        gk.json.reason_code ===
+          'K_TYPE-ID-PROOF-VERIFICATIONKEY-PUBLICSIGNALS-THRESHOLD-REFERENCE-CONDITION' &&
+        gk.json.reason_code.slice(2).split('-').join(',') ===
+          'TYPE,ID,PROOF,VERIFICATIONKEY,PUBLICSIGNALS,THRESHOLD,REFERENCE,CONDITION',
+      gk.json?.reason_code || ''
+    );
+    check(
+      'gatekeeper reason_code within 80 chars',
+      typeof gk.json?.reason_code === 'string' && gk.json.reason_code.length <= 80,
       `len=${gk.json?.reason_code?.length}`
     );
     check(

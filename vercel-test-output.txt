@@ -5,9 +5,11 @@ PASS  preflight: response signature verifies over raw body
 PASS  preflight: content-type is application/json
 PASS  forged signature: status 401
 PASS  forged signature: error body
+GK_STRUCTURE type:string,id:string,proof:object(pi_a,pi_b,pi_c,protocol,curve),verificationKey:object(protocol,curve),publicSignals:array,threshold:number,reference:string,condition:string
 PASS  gatekeeper: status 200
 PASS  gatekeeper: decision=REJECT and string reason_code
-PASS  gatekeeper: reason_code dbg lists mock keys
-PASS  gatekeeper: reason_code within 300 chars
+PASS  gatekeeper: reason_code matches protocol pattern /^[A-Z0-9_-]{2,80}$/
+PASS  gatekeeper: reason_code decodes to mock key names
+PASS  gatekeeper: reason_code within 80 chars
 PASS  gatekeeper: response signature verifies over raw body
-VERCEL TEST: ALL 12 CHECKS PASSED
+VERCEL TEST: ALL 13 CHECKS PASSED

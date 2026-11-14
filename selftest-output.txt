@@ -7,9 +7,10 @@ PASS  task HTTP 200 — got 200
 PASS  task response well-formed (ok, type=forecast, result.answer) — {"ok":true,"protocolVersion":"v1","type":"forecast","taskId":"selftest-task-1","result":{"answer":"no","confidence":0.5,"rationale":"placeholder-strategy: deterministic seed; no market model attached yet"}}
 PASS  task response signature valid
 PASS  gatekeeper HTTP 200 — got 200
-PASS  gatekeeper response has decision=REJECT and string reason_code — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"dbg:type:string,id:string,proof:object(pi_a,pi_b,pi_c,protocol,curve),verificationKey:object(protocol,curve),publicSignals:array,threshold:number,reference:string,condition:string","taskId":"practice_mock_1"}
-PASS  gatekeeper reason_code dbg lists mock keys — dbg:type:string,id:string,proof:object(pi_a,pi_b,pi_c,protocol,curve),verificationKey:object(protocol,curve),publicSignals:array,threshold:number,reference:string,condition:string
-PASS  gatekeeper reason_code within 300 chars — len=179
+PASS  gatekeeper response has decision=REJECT and string reason_code — {"ok":true,"protocolVersion":"v1","decision":"REJECT","reason_code":"K_TYPE-ID-PROOF-VERIFICATIONKEY-PUBLICSIGNALS-THRESHOLD-REFERENCE-CONDITION","taskId":"practice_mock_1"}
+PASS  gatekeeper reason_code matches protocol pattern /^[A-Z0-9_-]{2,80}$/ — K_TYPE-ID-PROOF-VERIFICATIONKEY-PUBLICSIGNALS-THRESHOLD-REFERENCE-CONDITION
+PASS  gatekeeper reason_code decodes to mock key names — K_TYPE-ID-PROOF-VERIFICATIONKEY-PUBLICSIGNALS-THRESHOLD-REFERENCE-CONDITION
+PASS  gatekeeper reason_code within 80 chars — len=75
 PASS  gatekeeper response signature valid
 PASS  bad signature -> HTTP 401 — got 401
 

@@ -97,22 +97,24 @@ const taskHandlers = {
    * Proof Gatekeeper tasks (protocol-v1).
    *
    * The platform's schema requires top-level `decision` ("APPROVE"|"REJECT")
-   * and `reason_code` (string) — a generic acknowledgement fails validation.
+   * and `reason_code` matching /^[A-Z0-9_-]{2,80}$/ — a generic
+   * acknowledgement fails validation.
    *
    * INSTRUMENTATION BUILD: the exact task-payload field names are not yet
    * published anywhere we can read, so for now the decision is the safe
-   * gatekeeper default "REJECT" and `reason_code` carries a bounded
-   * structural descriptor of the received payload (see describePayload), so
-   * the payload shape surfaces in the platform's practice diagnostics. Real
-   * verification (Groth16 validity, vk/condition match, threshold, proof
-   * reuse) replaces this once the payload shape is known.
+   * gatekeeper default "REJECT" and `reason_code` carries a pattern-safe
+   * encoding of the received payload's top-level key names (see
+   * gatekeeperReasonCode), so the payload shape surfaces in the platform's
+   * practice diagnostics; the full structure is also logged (GK_STRUCTURE).
+   * Real verification (Groth16 validity, vk/condition match, threshold,
+   * proof reuse) replaces this once the payload shape is known.
    */
   gatekeeper(task) {
     return {
       ok: true,
       protocolVersion: PROTOCOL_VERSION,
       decision: 'REJECT',
-      reason_code: describePayload(task),
+      reason_code: gatekeeperReasonCode(task),
       taskId: task.id ?? task.taskId ?? task.task_id ?? null,
     };
   },
@@ -165,24 +167,53 @@ function valueType(v) {
 }
 
 /**
- * Bounded structural descriptor of a payload, e.g.
- * "dbg:id:string,proof:object(pi_a,pi_b,pi_c),threshold:number".
- * Lists `key:type` for every top-level key; object values also list their
- * immediate subkeys. Whole string capped at 300 chars (incl. "dbg:" prefix).
+ * Full structural descriptor of a payload, e.g.
+ * "id:string,proof:object(pi_a,pi_b,pi_c),threshold:number".
+ * Lists `key:type` for every top-level key; object values also list ALL
+ * their immediate subkeys. Structure only — never any scalar values.
+ * Used for the GK_STRUCTURE log line (Vercel Logs backup channel).
  */
-function describePayload(task) {
+function describeStructure(task) {
   const parts = [];
   for (const [key, val] of Object.entries(task)) {
     const t = valueType(val);
     if (t === 'object') {
-      const subs = Object.keys(val).slice(0, 12);
+      const subs = Object.keys(val);
       parts.push(subs.length ? `${key}:object(${subs.join(',')})` : `${key}:object`);
     } else {
       parts.push(`${key}:${t}`);
     }
   }
-  const out = 'dbg:' + parts.join(',');
-  return out.length > 300 ? out.slice(0, 297) + '...' : out;
+  return parts.join(',');
+}
+
+/**
+ * Pattern-safe instrumentation reason_code for Gatekeeper responses.
+ * The platform requires /^[A-Z0-9_-]{2,80}$/. Encoding: "K_" followed by
+ * the payload's top-level key names — each uppercased with any character
+ * outside [A-Z0-9] mapped to "_" — joined with "-". Total length capped
+ * at 80 chars: keys are appended whole and dropped once the next one
+ * would overflow (a single oversized first key is hard-truncated as a
+ * last resort). Empty payload -> "K_EMPTY".
+ */
+function gatekeeperReasonCode(task) {
+  const keys = Object.keys(task ?? {});
+  if (keys.length === 0) return 'K_EMPTY';
+  const sanitize = (k) => String(k).toUpperCase().replace(/[^A-Z0-9]/g, '_') || '_';
+  let out = 'K_';
+  let first = true;
+  for (const key of keys) {
+    const name = sanitize(key);
+    const candidate = first ? out + name : `${out}-${name}`;
+    if (candidate.length > 80) {
+      // A single oversized first key is hard-truncated; otherwise this and
+      // all trailing keys are dropped cleanly (no partial key names).
+      return first ? candidate.slice(0, 80) : out;
+    }
+    out = candidate;
+    first = false;
+  }
+  return out;
 }
 
 /** Preflight detection: explicit markers the platform's connectivity check may use. */
@@ -202,6 +233,9 @@ function handleTask(task) {
   // (decision + reason_code) and are detected liberally — before the generic
   // type registry, since their `type` string is not yet confirmed.
   if (isGatekeeperTask(task)) {
+    // Backup instrumentation channel: full payload structure (keys + types
+    // + immediate subkeys, never scalar values) lands in the server logs.
+    console.log('GK_STRUCTURE ' + describeStructure(task));
     return { status: 200, body: taskHandlers.gatekeeper(task) };
   }
   const type = String(task.type ?? task.taskType ?? task.task?.type ?? '').toLowerCase();

@@ -7,7 +7,7 @@
  *  1. Signed preflight -> 200, exact {ok:true, protocolVersion:"v1"} body,
  *     and an `x-agent-games-signature` response header that verifies.
  *  2. Forged signature -> 401.
- *  3. Signed Gatekeeper task -> decision + reason_code (dbg:) per protocol-v1.
+ *  3. Signed Gatekeeper task -> decision + pattern-safe reason_code per protocol-v1.
  *
  * Run: node test-vercel.js
  */
@@ -117,19 +117,20 @@ function check(name, cond) {
     gk && gk.decision === 'REJECT' && typeof gk.reason_code === 'string'
   );
   check(
-    'gatekeeper: reason_code dbg lists mock keys',
-    !!gk &&
-      gk.reason_code.startsWith('dbg:') &&
-      gk.reason_code.includes('proof:object(pi_a,pi_b,pi_c,protocol,curve)') &&
-      gk.reason_code.includes('verificationKey:object') &&
-      gk.reason_code.includes('publicSignals:array') &&
-      gk.reason_code.includes('threshold:number') &&
-      gk.reason_code.includes('reference:string') &&
-      gk.reason_code.includes('condition:string')
+    'gatekeeper: reason_code matches protocol pattern /^[A-Z0-9_-]{2,80}$/',
+    !!gk && /^[A-Z0-9_-]{2,80}$/.test(gk.reason_code)
   );
   check(
-    'gatekeeper: reason_code within 300 chars',
-    !!gk && gk.reason_code.length <= 300
+    'gatekeeper: reason_code decodes to mock key names',
+    !!gk &&
+      gk.reason_code ===
+        'K_TYPE-ID-PROOF-VERIFICATIONKEY-PUBLICSIGNALS-THRESHOLD-REFERENCE-CONDITION' &&
+      gk.reason_code.slice(2).split('-').join(',') ===
+        'TYPE,ID,PROOF,VERIFICATIONKEY,PUBLICSIGNALS,THRESHOLD,REFERENCE,CONDITION'
+  );
+  check(
+    'gatekeeper: reason_code within 80 chars',
+    !!gk && gk.reason_code.length <= 80
   );
   check(
     'gatekeeper: response signature verifies over raw body',
